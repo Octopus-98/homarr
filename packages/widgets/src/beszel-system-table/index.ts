@@ -38,6 +38,9 @@ export const { definition, componentLoader } = createWidgetDefinition("beszelSys
   createOptions() {
     return optionsBuilder.from(
       (factory) => ({
+        fahrenheit: factory.switch({
+          defaultValue: false,
+        }),
         columns: factory.multiSelect({
           defaultValue: [...beszelTableMetricOptionKeys],
           options: [

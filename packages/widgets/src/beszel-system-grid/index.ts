@@ -12,6 +12,9 @@ export const { definition, componentLoader } = createWidgetDefinition("beszelSys
   ...getWidgetIntegrationConfig("beszelSystemGrid"),
   createOptions() {
     return optionsBuilder.from((factory) => ({
+      fahrenheit: factory.switch({
+        defaultValue: false,
+      }),
       statusFilter: factory.select({
         defaultValue: "all",
         options: statusOptions,
