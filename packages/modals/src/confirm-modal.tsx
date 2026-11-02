@@ -20,6 +20,8 @@ export interface ConfirmModalProps {
   closeOnCancel?: boolean;
   cancelProps?: ButtonProps & ComponentPropsWithoutRef<"button">;
   confirmProps?: ButtonProps & ComponentPropsWithoutRef<"button">;
+  /** Optional action rendered before Cancel. */
+  alternativeProps?: ButtonProps & ComponentPropsWithoutRef<"button">;
   groupProps?: GroupProps;
 
   labels?: {
@@ -31,7 +33,7 @@ export interface ConfirmModalProps {
 export const ConfirmModal = createModal<Omit<ConfirmModalProps, "title">>(({ actions, innerProps }) => {
   const [loading, setLoading] = useState(false);
   const t = useI18n();
-  const { children, onConfirm, onCancel, cancelProps, confirmProps, groupProps, labels } = innerProps;
+  const { children, onConfirm, onCancel, cancelProps, confirmProps, alternativeProps, groupProps, labels } = innerProps;
 
   const closeOnConfirm = innerProps.closeOnConfirm ?? true;
   const closeOnCancel = innerProps.closeOnCancel ?? true;
@@ -54,6 +56,24 @@ export const ConfirmModal = createModal<Omit<ConfirmModalProps, "title">>(({ act
       }
     },
     [cancelProps, onCancel, closeOnCancel, actions],
+  );
+
+  const handleAlternative = useCallback(
+    async (event: React.MouseEvent<HTMLButtonElement>) => {
+      setLoading(true);
+      try {
+        if (typeof alternativeProps?.onClick === "function") {
+          await alternativeProps.onClick(event);
+        }
+
+        actions.closeModal();
+      } catch {
+        // Keep the modal open. Callers own action-specific error feedback.
+      } finally {
+        setLoading(false);
+      }
+    },
+    [alternativeProps, actions],
   );
 
   const handleConfirm = useCallback(
@@ -85,6 +105,11 @@ export const ConfirmModal = createModal<Omit<ConfirmModalProps, "title">>(({ act
       {children && <Box mb="md">{children}</Box>}
 
       <Group justify="flex-end" {...groupProps}>
+        {alternativeProps ? (
+          <Button variant="default" {...alternativeProps} onClick={handleAlternative} loading={loading}>
+            {alternativeProps.children}
+          </Button>
+        ) : null}
         <Button variant="default" {...cancelProps} onClick={handleCancel}>
           {cancelProps?.children ?? translateIfNecessary(t, cancelLabel)}
         </Button>

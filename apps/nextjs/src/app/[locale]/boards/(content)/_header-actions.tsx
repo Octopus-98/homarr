@@ -23,6 +23,8 @@ import { normalizeBoardLayoutBounds } from "~/components/board/layout/normalize-
 import { loadGridEditorAsync, scheduleGridEditorWarmup } from "~/components/board/sections/grid/grid-editor-loader";
 import { HeaderButton } from "~/components/layout/header/button";
 import { TourTarget } from "~/components/layout/header/tour-target";
+import type { BoardEditLeaveGuard } from "./board-edit-leave-guard";
+import { registerBoardEditLeaveGuard } from "./board-edit-leave-guard";
 import type * as EditActionsModule from "./_edit-actions";
 
 let editActionsModulePromise: Promise<typeof EditActionsModule> | undefined;
@@ -94,6 +96,7 @@ const EditModeMenu = ({ demoReadOnly }: { demoReadOnly: boolean }) => {
     searchParams.get("layout") !== null &&
     searchParams.get("returnTo") === "settings";
   const latestBoardRef = useRef(board);
+  const pendingLeaveHrefRef = useRef<string | null>(null);
 
   latestBoardRef.current = board;
   useLayoutEffect(() => {
@@ -113,9 +116,21 @@ const EditModeMenu = ({ demoReadOnly }: { demoReadOnly: boolean }) => {
       void utils.widget.customApi.getData.invalidate();
       void revalidatePathActionAsync(`/boards/${board.name}`);
       close();
+      const pendingLeaveHref = pendingLeaveHrefRef.current;
+      pendingLeaveHrefRef.current = null;
+      if (pendingLeaveHref) {
+        const destination = new URL(pendingLeaveHref, window.location.href);
+        if (destination.origin !== window.location.origin) {
+          window.location.assign(destination.href);
+          return;
+        }
+        router.push(`${destination.pathname}${destination.search}${destination.hash}`);
+        return;
+      }
       if (returnToLayoutSettings) router.push(`/boards/${board.name}/settings?tab=layout`);
     },
     onError(error) {
+      pendingLeaveHrefRef.current = null;
       let message = t("notification.error.message");
       if (error.data?.isBoardLayoutBoundsError) message = error.message;
       showErrorNotification({
@@ -195,8 +210,16 @@ const EditModeMenu = ({ demoReadOnly }: { demoReadOnly: boolean }) => {
     });
   }, [board.name, close, openConfirmModal, router, tBoardSetting, tCommon, utils.board.getBoardByName]);
 
+  const saveAndLeave = useCallback(
+    (href: string) => {
+      pendingLeaveHrefRef.current = href;
+      saveBoard(latestBoardRef.current);
+    },
+    [saveBoard],
+  );
+
   useHotkeys([[hotkeys.toggleBoardEdit, () => void toggle()]]);
-  usePreventLeaveWithDirty(isEditMode);
+  usePreventLeaveWithDirty(isEditMode, demoReadOnly ? undefined : saveAndLeave);
 
   if (returnToLayoutSettings) {
     return (
@@ -249,56 +272,54 @@ const EditModeMenu = ({ demoReadOnly }: { demoReadOnly: boolean }) => {
   );
 };
 
-const anchorSelector = "a[href]:not([target='_blank'])";
-const usePreventLeaveWithDirty = (isDirty: boolean) => {
+const usePreventLeaveWithDirty = (isDirty: boolean, saveAndLeave?: (href: string) => void) => {
   const tBoard = useI18n("board");
   const tCommon = useI18n("common");
   const { openConfirmModal } = useConfirmModal();
   const router = useRouter();
+  const confirmationOpenRef = useRef(false);
+  const guardRef = useRef<BoardEditLeaveGuard>({
+    confirmNavigation: () => undefined,
+    blockUnload: env.NODE_ENV !== "development",
+  });
 
-  useEffect(() => {
-    if (!isDirty) return;
+  guardRef.current.blockUnload = env.NODE_ENV !== "development";
+  guardRef.current.confirmNavigation = (href) => {
+    if (confirmationOpenRef.current) return;
+    confirmationOpenRef.current = true;
 
-    const handleClick = (event: MouseEvent) => {
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>(anchorSelector) : null;
-      if (!target) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      openConfirmModal({
+    const destination = new URL(href, window.location.href);
+    openConfirmModal(
+      {
         title: tBoard("action.edit.confirmLeave.title"),
         children: tBoard("action.edit.confirmLeave.message"),
         onConfirm() {
-          router.push(target.href);
+          if (destination.origin !== window.location.origin) {
+            window.location.assign(destination.href);
+            return;
+          }
+          router.push(`${destination.pathname}${destination.search}${destination.hash}`);
         },
         confirmProps: {
           children: tCommon("action.discard"),
         },
-      });
-    };
+        alternativeProps: saveAndLeave
+          ? {
+              children: tBoard("action.edit.save"),
+              onClick: () => saveAndLeave(href),
+            }
+          : undefined,
+      },
+      {
+        onClose: () => {
+          confirmationOpenRef.current = false;
+        },
+      },
+    );
+  };
 
-    const handlePopState = (event: Event) => {
-      window.history.pushState(null, document.title, window.location.href);
-      event.preventDefault();
-    };
-
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (env.NODE_ENV === "development") return;
-
-      event.preventDefault();
-      event.returnValue = true;
-    };
-
-    document.addEventListener("click", handleClick, true);
-    window.addEventListener("popstate", handlePopState);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    return () => {
-      document.removeEventListener("click", handleClick, true);
-      window.removeEventListener("popstate", handlePopState);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [isDirty, openConfirmModal, router, tBoard, tCommon]);
+  useEffect(() => {
+    if (!isDirty) return;
+    return registerBoardEditLeaveGuard(guardRef.current);
+  }, [isDirty]);
 };

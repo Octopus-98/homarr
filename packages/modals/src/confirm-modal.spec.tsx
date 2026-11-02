@@ -40,6 +40,33 @@ afterEach(async () => {
 });
 
 describe("ConfirmModal", () => {
+  test("runs an alternative action and closes", async () => {
+    const closeModal = vi.fn();
+    const onAlternative = vi.fn();
+
+    await act(async () =>
+      root.render(
+        <MantineProvider>
+          <ConfirmModalComponent
+            actions={{ closeModal }}
+            innerProps={{
+              children: "Leave this board?",
+              onConfirm: vi.fn(),
+              alternativeProps: { children: "Save board", onClick: onAlternative },
+            }}
+          />
+        </MantineProvider>,
+      ),
+    );
+
+    const saveButton = [...host.querySelectorAll("button")].find((button) => button.textContent === "Save board");
+    if (!saveButton) throw new Error("Save board button was not rendered");
+    await act(async () => saveButton.click());
+
+    expect(onAlternative).toHaveBeenCalledTimes(1);
+    expect(closeModal).toHaveBeenCalledTimes(1);
+  });
+
   test("clears loading and stays open when confirmation rejects", async () => {
     const closeModal = vi.fn();
     let rejectConfirmation!: (error: Error) => void;
